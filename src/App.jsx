@@ -111,17 +111,17 @@ export default function App() {
   const [bpm, setBpm] = useState(120);
   const [durationSec, setDurationSec] = useState(180);
   const [measuresPerRow, setMeasuresPerRow] = useState(DEFAULT_MEASURES_PER_ROW);
-  const [gridDivisions, setGridDivisions] = useState(8); // グリッド分割数
+  const [gridDivisions, setGridDivisions] = useState(8); 
   const [keySignature, setKeySignature] = useState('C');
   const [isRoman, setIsRoman] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const [measures, setMeasures] = useState(
     Array.from({ length: 16 }, () => ({ id: generateId('m'), chords: [], section: null, isBreak: false, isEnd: false, customKey: null, isRest: false }))
   );
   
-  // Lyrics State (key: measureId, value: string)
   const [lyrics, setLyrics] = useState({});
 
   // Palette State
@@ -133,8 +133,8 @@ export default function App() {
   const [customSection, setCustomSection] = useState('');
   
   // Selection & Clipboard State
-  const [selectedChords, setSelectedChords] = useState([]); // [{ measureId, chordId }]
-  const [selectedMeasures, setSelectedMeasures] = useState([]); // [measureId]
+  const [selectedChords, setSelectedChords] = useState([]); 
+  const [selectedMeasures, setSelectedMeasures] = useState([]); 
   const [clipboardMeasures, setClipboardMeasures] = useState([]); 
   const [isPasteMode, setIsPasteMode] = useState(false);
 
@@ -142,7 +142,7 @@ export default function App() {
 
   // --- Dynamic Grid Snapping ---
   const snapToGrid = useCallback((position) => {
-    if (gridDivisions === 0) return position; // スナップOFF (自由配置)
+    if (gridDivisions === 0) return position; 
     const gridSize = 100 / gridDivisions; 
     const index = Math.max(0, Math.min(gridDivisions - 1, Math.floor(position / gridSize)));
     return (index * gridSize) + (gridSize / 2);
@@ -210,8 +210,57 @@ export default function App() {
     setIsPreviewMode(true);
   };
 
-  const executePrint = () => {
-    window.print();
+  // ----------------------------------------------------
+  // 直接PDFを生成してダウンロードするロジック
+  // ----------------------------------------------------
+  const executeDirectPdfDownload = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      const { default: html2canvas } = await import('html2canvas');
+      const { jsPDF } = await import('jspdf');
+
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const margin = 15; // 左右上下の余白(mm)
+      const contentWidth = pdfWidth - margin * 2;
+      let currentY = margin;
+
+      // 1. タイトル部分の描画
+      const titleEl = document.getElementById('print-title');
+      if (titleEl) {
+        const titleCanvas = await html2canvas(titleEl, { scale: 2, logging: false });
+        const tImg = titleCanvas.toDataURL('image/png');
+        const tHeight = (titleCanvas.height * contentWidth) / titleCanvas.width;
+        pdf.addImage(tImg, 'PNG', margin, currentY, contentWidth, tHeight);
+        currentY += tHeight + 5; // タイトル下の余白
+      }
+
+      // 2. 行（段）ごとの描画と改ページ判定
+      const rowElements = document.querySelectorAll('.score-row');
+      for (let i = 0; i < rowElements.length; i++) {
+        const rowEl = rowElements[i];
+        const rowCanvas = await html2canvas(rowEl, { scale: 2, logging: false });
+        const rImg = rowCanvas.toDataURL('image/png');
+        const rHeight = (rowCanvas.height * contentWidth) / rowCanvas.width;
+
+        // 次の行を描画するとページの下端を超える場合は改ページ
+        if (currentY + rHeight > pdfHeight - margin) {
+          pdf.addPage();
+          currentY = margin;
+        }
+
+        pdf.addImage(rImg, 'PNG', margin, currentY, contentWidth, rHeight);
+        currentY += rHeight; // 余白はコンポーネント自体のマージンを利用
+      }
+
+      pdf.save(`${title || 'chord-score'}.pdf`);
+    } catch (err) {
+      console.error('PDF出力エラー:', err);
+      alert('PDFの作成に失敗しました。\n(html2canvas, jspdfがインストールされているか確認してください)');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const handleExport = () => {
@@ -236,7 +285,7 @@ export default function App() {
         setBpm(data.bpm || 120);
         setDurationSec(data.durationSec || 180);
         setMeasuresPerRow(data.measuresPerRow || 4);
-        setGridDivisions(data.gridDivisions || 8);
+        setGridDivisions(data.gridDivisions !== undefined ? data.gridDivisions : 8);
         setKeySignature(data.keySignature || 'C');
         setIsRoman(data.isRoman || false);
         setMeasures(data.measures || []);
@@ -587,18 +636,7 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col text-gray-900 font-sans ${isPreviewMode ? 'bg-white' : 'bg-gray-50'} print:bg-white`}>
-      <style>{`
-        @media print {
-          @page { size: A4 portrait; margin: 10mm 5mm 10mm 5mm; }
-          @page { @bottom-center { content: counter(page); } }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .print-avoid-break {
-            page-break-inside: avoid !important;
-            break-inside: avoid-page !important;
-          }
-        }
-      `}</style>
+    <div className={`min-h-screen flex flex-col text-gray-900 font-sans ${isPreviewMode ? 'bg-white' : 'bg-gray-50'}`}>
 
       {/* Paste Mode Floating Banner */}
       {isPasteMode && !isPreviewMode && (
@@ -611,23 +649,32 @@ export default function App() {
       )}
 
       {isPreviewMode && (
-        <div className="fixed top-4 right-4 flex flex-col items-end gap-2 z-50 print:hidden">
+        <div className="fixed top-4 right-4 flex flex-col items-end gap-2 z-50">
           <div className="flex gap-4">
-            <button onClick={() => setIsPreviewMode(false)} className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg shadow-md hover:bg-gray-50 transition font-bold">
+            <button 
+              onClick={() => setIsPreviewMode(false)} 
+              disabled={isGeneratingPdf}
+              className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg shadow-md hover:bg-gray-50 transition font-bold disabled:opacity-50"
+            >
               編集に戻る
             </button>
-            <button onClick={executePrint} className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-blue-700 transition font-bold">
-              <Printer className="w-5 h-5" /> PDFとして保存 / 印刷
+            <button 
+              onClick={executeDirectPdfDownload} 
+              disabled={isGeneratingPdf}
+              className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-blue-700 transition font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Printer className="w-5 h-5" /> 
+              {isGeneratingPdf ? 'PDF生成中...' : 'PDFをダウンロード'}
             </button>
           </div>
           <p className="text-xs text-gray-700 bg-white/90 p-2 rounded shadow-md border border-gray-200">
-            ※ ページ番号を印字するには、印刷ダイアログの「詳細設定」から<br/>「ヘッダーとフッター」オプションにチェックを入れてください。
+            ※ 画質や文字選択を重視する場合は、一旦「編集に戻る」からブラウザの印刷機能をご利用ください。
           </p>
         </div>
       )}
 
       {!isPreviewMode && (
-        <header className="bg-white border-b px-6 py-3 flex flex-wrap gap-6 items-center shadow-sm print:hidden z-10">
+        <header className="bg-white border-b px-6 py-3 flex flex-wrap gap-6 items-center shadow-sm z-10">
           <div className="flex items-center gap-2">
               <Music className="w-5 h-5 text-blue-500" />
               <h1 className="font-bold text-lg hidden sm:block">ChordEditor</h1>
@@ -697,21 +744,22 @@ export default function App() {
             </div>
 
             <button onClick={handlePrintClick} className="flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition ml-2 shadow-sm text-sm">
-              <Printer className="w-4 h-4" /> PDF / 印刷
+              <Printer className="w-4 h-4" /> プレビュー / PDF
             </button>
           </div>
         </header>
       )}
 
-      <div className={`${isPreviewMode ? 'block' : 'hidden print:block'} text-center mt-12 mb-4 relative max-w-4xl mx-auto w-full`}>
-         <h1 className="text-3xl font-bold border-b-2 border-black inline-block px-8 pb-2">{title}</h1>
-         <span className="absolute right-0 bottom-2 text-xl font-bold">Key: {formatKeyDisp(keySignature)}</span>
+      {/* HTML2Canvas Capture Target: Title */}
+      <div id="print-title" className={`${isPreviewMode ? 'block' : 'hidden'} text-center mt-12 mb-4 relative max-w-4xl mx-auto w-full`}>
+         <h1 className="text-3xl font-bold border-b-2 border-black inline-block px-8 pb-2 bg-white">{title}</h1>
+         <span className="absolute right-0 bottom-2 text-xl font-bold bg-white px-2">Key: {formatKeyDisp(keySignature)}</span>
       </div>
 
-      <main className={`flex-1 overflow-auto p-4 sm:p-8 print:py-0 print:px-8 ${isPreviewMode ? 'bg-white sm:px-12' : 'bg-transparent'} transition-all duration-300 ${!isPreviewMode && isPaletteOpen ? 'pb-80' : 'pb-24'}`}>
+      <main className={`flex-1 overflow-auto p-4 sm:p-8 ${isPreviewMode ? 'bg-white sm:px-12 py-0' : 'bg-transparent'} transition-all duration-300 ${!isPreviewMode && isPaletteOpen ? 'pb-80' : 'pb-24'}`}>
         
         {!isPreviewMode && (
-          <div className="max-w-4xl mx-auto mb-8 print:hidden relative flex justify-center items-end">
+          <div className="max-w-4xl mx-auto mb-8 relative flex justify-center items-end">
               <input 
                 type="text" 
                 value={title} 
@@ -725,9 +773,9 @@ export default function App() {
           </div>
         )}
 
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-5xl mx-auto bg-white">
           {rows.map((row, rowIndex) => (
-            <div key={row.id} className="mb-2 pt-6 break-inside-avoid print-avoid-break relative">
+            <div key={row.id} className="score-row mb-2 pt-6 relative bg-white">
               <div className="flex w-full items-end">
                 {row.measures.map((measure, mIndex) => {
                   const isMeasureSelected = selectedMeasures.includes(measure.id);
@@ -735,7 +783,7 @@ export default function App() {
                   const effectiveKey = getEffectiveKey(measures, globalIndex, keySignature);
 
                   // Calculate overlap offsets
-                  const THRESHOLD = 15; // 15%以内なら重なると判定
+                  const THRESHOLD = 15; 
                   const processedChords = [];
                   measure.chords.forEach((chord) => {
                     let level = 0;
@@ -772,30 +820,30 @@ export default function App() {
                           return (
                             <div 
                               key={`grid-${i}`} 
-                              className="absolute top-1/4 bottom-1/4 w-[1px] border-l border-dashed border-gray-200 print:hidden z-0 pointer-events-none" 
+                              className="absolute top-1/4 bottom-1/4 w-[1px] border-l border-dashed border-gray-200 z-0 pointer-events-none" 
                               style={{ left: `${(i * gridSize) + (gridSize / 2)}%` }}
                             ></div>
                           );
                         })}
 
-                        <div className="absolute -top-6 -left-2 flex gap-1 z-10 print:z-0">
+                        <div className="absolute -top-6 -left-2 flex gap-1 z-10">
                           {measure.section && (
-                            <div className={`border border-gray-800 px-2 py-0.5 text-xs font-bold bg-white ${isPreviewMode ? 'shadow-none' : 'shadow-sm'} print:shadow-none`}>
+                            <div className={`border border-gray-800 px-2 py-0.5 text-xs font-bold bg-white ${isPreviewMode ? 'shadow-none' : 'shadow-sm'}`}>
                               {measure.section}
                               {!isPreviewMode && (
                                 <button 
-                                   className="ml-2 text-gray-400 hover:text-red-500 print:hidden text-[10px]"
+                                   className="ml-2 text-gray-400 hover:text-red-500 text-[10px]"
                                    onClick={(e) => { e.stopPropagation(); setMeasures(prev => prev.map(m => m.id === measure.id ? {...m, section: null} : m)); }}
                                 >×</button>
                               )}
                             </div>
                           )}
                           {measure.customKey && (
-                            <div className={`border border-blue-600 px-2 py-0.5 text-xs font-bold bg-blue-50 text-blue-800 ${isPreviewMode ? 'shadow-none border-black bg-transparent text-black' : 'shadow-sm'} print:shadow-none print:border-black print:bg-transparent print:text-black`}>
+                            <div className={`border border-blue-600 px-2 py-0.5 text-xs font-bold bg-blue-50 text-blue-800 ${isPreviewMode ? 'shadow-none border-black bg-transparent text-black' : 'shadow-sm'}`}>
                               Key: {formatKeyDisp(measure.customKey)}
                               {!isPreviewMode && (
                                 <button 
-                                   className="ml-2 text-blue-400 hover:text-red-500 print:hidden text-[10px]"
+                                   className="ml-2 text-blue-400 hover:text-red-500 text-[10px]"
                                    onClick={(e) => { e.stopPropagation(); setMeasures(prev => prev.map(m => m.id === measure.id ? {...m, customKey: null} : m)); }}
                                 >×</button>
                               )}
@@ -803,11 +851,11 @@ export default function App() {
                           )}
                         </div>
 
-                        {!isPreviewMode && measure.isBreak && <CornerDownLeft className="absolute top-1 right-1 w-4 h-4 text-blue-500 print:hidden opacity-50" />}
+                        {!isPreviewMode && measure.isBreak && <CornerDownLeft className="absolute top-1 right-1 w-4 h-4 text-blue-500 opacity-50" />}
                         {measure.isEnd && <div className="absolute bottom-5 right-1 font-bold text-black text-xs sm:text-sm z-10">End</div>}
 
                         {measure.isRest && (
-                          <div className="absolute top-5 left-2 right-2 border-t-2 border-dashed border-gray-800 print:border-black z-10 pointer-events-none"></div>
+                          <div className="absolute top-5 left-2 right-2 border-t-2 border-dashed border-gray-800 z-10 pointer-events-none"></div>
                         )}
 
                         {processedChords.map(chord => {
@@ -824,7 +872,7 @@ export default function App() {
                                 absolute -translate-x-1/2 flex flex-col items-center leading-tight z-20
                                 ${!isPreviewMode && !isPasteMode ? 'cursor-move hover:scale-110 hover:z-30 transition-transform chord-element' : 'chord-element'}
                                 ${isChordSelected ? 'text-red-600 font-bold scale-110 z-30' : 'text-gray-900 font-bold'}
-                                bg-white/95 print:bg-white px-0.5 rounded
+                                bg-white px-0.5 rounded
                               `}
                               style={{ 
                                 left: `${chord.position}%`, 
@@ -834,7 +882,7 @@ export default function App() {
                             >
                               <span className={`tracking-tighter ${disp.on ? 'text-[11px] md:text-xs' : 'text-sm md:text-base'}`}>{disp.main}</span>
                               {disp.on && (
-                                <div className="flex flex-col items-center w-full">
+                                <div className="flex flex-col items-center w-full bg-white">
                                   <div className={`w-[120%] h-[1.5px] my-[1px] ${isChordSelected ? 'bg-red-600' : 'bg-gray-800'}`}></div>
                                   <span className="tracking-tighter text-[11px] md:text-xs">{disp.on}</span>
                                 </div>
@@ -843,12 +891,11 @@ export default function App() {
                           )
                         })}
 
-                        <div className="absolute top-1/2 left-0 right-0 h-[1.5px] bg-gray-600 print:bg-black"></div>
-                        {(mIndex === 0) && <div className="absolute top-1/3 bottom-1/3 left-0 w-[1.5px] bg-gray-600 print:bg-black"></div>}
-                        <div className="absolute top-1/3 bottom-1/3 right-0 w-[1.5px] bg-gray-600 print:bg-black"></div>
+                        <div className="absolute top-1/2 left-0 right-0 h-[1.5px] bg-gray-600"></div>
+                        {(mIndex === 0) && <div className="absolute top-1/3 bottom-1/3 left-0 w-[1.5px] bg-gray-600"></div>}
+                        <div className="absolute top-1/3 bottom-1/3 right-0 w-[1.5px] bg-gray-600"></div>
                       </div>
                       
-                      {/* Lyrics input for this specific measure */}
                       <input 
                         type="text" 
                         readOnly={isPreviewMode}
@@ -859,7 +906,7 @@ export default function App() {
                           w-full text-center -mt-5 py-0 text-sm md:text-base outline-none transition-colors relative z-10 leading-tight
                           ${isPreviewMode 
                             ? 'border-none bg-transparent text-black' 
-                            : 'text-gray-700 border-b border-dashed border-gray-300 focus:border-blue-500 bg-gray-50/50 print:border-none print:bg-transparent print:text-black print:placeholder-transparent'}
+                            : 'text-gray-700 border-b border-dashed border-gray-300 focus:border-blue-500 bg-gray-50/50'}
                         `}
                       />
                     </div>
@@ -872,7 +919,7 @@ export default function App() {
       </main>
 
       {!isPreviewMode && (
-        <footer className={`fixed bottom-0 left-0 right-0 bg-[#42b9f5] rounded-t-[2rem] shadow-[0_-10px_20px_rgba(0,0,0,0.15)] print:hidden flex flex-col z-20 transition-transform duration-300 ${isPaletteOpen ? 'translate-y-0' : 'translate-y-[16.5rem]'}`}>
+        <footer className={`fixed bottom-0 left-0 right-0 bg-[#42b9f5] rounded-t-[2rem] shadow-[0_-10px_20px_rgba(0,0,0,0.15)] flex flex-col z-20 transition-transform duration-300 ${isPaletteOpen ? 'translate-y-0' : 'translate-y-[16.5rem]'}`}>
           <div 
             className="absolute -top-7 left-1/2 -translate-x-1/2 bg-[#42b9f5] px-6 py-1 rounded-t-xl cursor-pointer hover:brightness-110 flex items-center justify-center shadow-[0_-5px_10px_rgba(0,0,0,0.1)] transition-colors"
             onClick={() => setIsPaletteOpen(!isPaletteOpen)}
