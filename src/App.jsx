@@ -826,7 +826,7 @@ export default function App() {
                           );
                         })}
 
-                        <div className="absolute -top-6 -left-2 flex gap-1 z-10">
+                        <div className="absolute top-0 left-0 flex gap-1 z-10">
                           {measure.section && (
                             <div className={`border border-gray-800 px-2 py-0.5 text-xs font-bold bg-white ${isPreviewMode ? 'shadow-none' : 'shadow-sm'}`}>
                               {measure.section}
