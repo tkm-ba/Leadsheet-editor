@@ -211,10 +211,15 @@ export default function App() {
   };
 
   // ----------------------------------------------------
-  // 直接PDFを生成してダウンロードするロジック
+  // 直接PDFを生成してダウンロードするロジック (ズレ補正版)
   // ----------------------------------------------------
   const executeDirectPdfDownload = async () => {
     setIsGeneratingPdf(true);
+    
+    // スクロール位置によるhtml2canvasのズレを防止するため、一時的にトップへ戻す
+    const originalScrollY = window.scrollY;
+    window.scrollTo(0, 0);
+
     try {
       const { default: html2canvas } = await import('html2canvas');
       const { jsPDF } = await import('jspdf');
@@ -226,21 +231,36 @@ export default function App() {
       const contentWidth = pdfWidth - margin * 2;
       let currentY = margin;
 
+      const opt = {
+        scale: 2,
+        useCORS: true,
+        scrollY: 0,
+        windowWidth: document.documentElement.scrollWidth, // レイアウト崩れ防止
+      };
+
+      const rowElements = document.querySelectorAll('.score-row');
+      const baseRowWidth = rowElements[0]?.offsetWidth || 1; // 基準となる横幅
+
       // 1. タイトル部分の描画
       const titleEl = document.getElementById('print-title');
       if (titleEl) {
-        const titleCanvas = await html2canvas(titleEl, { scale: 2, logging: false });
+        const titleCanvas = await html2canvas(titleEl, opt);
         const tImg = titleCanvas.toDataURL('image/png');
-        const tHeight = (titleCanvas.height * contentWidth) / titleCanvas.width;
-        pdf.addImage(tImg, 'PNG', margin, currentY, contentWidth, tHeight);
+        
+        // タイトルのスケールを段(row)に合わせるための計算
+        const scaleRatio = titleEl.offsetWidth / baseRowWidth;
+        const titlePdfWidth = contentWidth * scaleRatio;
+        const tHeight = (titleCanvas.height * titlePdfWidth) / titleCanvas.width;
+        const titleX = margin + (contentWidth - titlePdfWidth) / 2; // 中央揃え
+
+        pdf.addImage(tImg, 'PNG', titleX, currentY, titlePdfWidth, tHeight);
         currentY += tHeight + 5; // タイトル下の余白
       }
 
       // 2. 行（段）ごとの描画と改ページ判定
-      const rowElements = document.querySelectorAll('.score-row');
       for (let i = 0; i < rowElements.length; i++) {
         const rowEl = rowElements[i];
-        const rowCanvas = await html2canvas(rowEl, { scale: 2, logging: false });
+        const rowCanvas = await html2canvas(rowEl, opt);
         const rImg = rowCanvas.toDataURL('image/png');
         const rHeight = (rowCanvas.height * contentWidth) / rowCanvas.width;
 
@@ -259,6 +279,7 @@ export default function App() {
       console.error('PDF出力エラー:', err);
       alert('PDFの作成に失敗しました。\n(html2canvas, jspdfがインストールされているか確認してください)');
     } finally {
+      window.scrollTo(0, originalScrollY); // スクロール位置を元に戻す
       setIsGeneratingPdf(false);
     }
   };
@@ -725,6 +746,7 @@ export default function App() {
                 <option value={4}>4分割</option>
                 <option value={6}>6分割</option>
                 <option value={8}>8分割</option>
+                <option value={16}>16分割</option>
                 <option value={0}>自由</option>
               </select>
             </label>
